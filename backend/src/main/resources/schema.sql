@@ -23,6 +23,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP TABLE IF EXISTS fitting_action_log;
 DROP TABLE IF EXISTS fitting_rework_round;
 DROP TABLE IF EXISTS fitting_issue;
+DROP TABLE IF EXISTS grading_scheme;
 DROP TABLE IF EXISTS work_order;
 DROP TABLE IF EXISTS custom_order;
 DROP TABLE IF EXISTS measurement;
@@ -228,6 +229,33 @@ CREATE TABLE fitting_action_log (
     KEY idx_fal_issue (issue_id),
     KEY idx_fal_order (order_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '试衣整改操作流水';
+
+-- ---------------------------------------------------------------------------
+-- 模块七：版型批量放码
+-- 放码方案（spec_json）与上一次完整结果（result_json）整体 JSON 留存：
+--   * 内部统一微米有理数量，cm/mm 只是显示写法，换单位不重新舍入、无累计误差；
+--   * schema_version=1 为旧版纯厘米小数方案，按兼容规则读入，结果与旧口径完全一致；
+--   * 公式无法计算时服务端整次失败，result_json 不被覆盖，上一次完整结果保留。
+-- ---------------------------------------------------------------------------
+CREATE TABLE grading_scheme (
+    id                   BIGINT       NOT NULL AUTO_INCREMENT,
+    scheme_no            VARCHAR(40)  NOT NULL COMMENT '方案编号',
+    name                 VARCHAR(100) NOT NULL COMMENT '方案名称',
+    style_id             BIGINT       COMMENT '关联款式（临时方案为空）',
+    temporary            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '是否临时计算方案',
+    schema_version       INT          NOT NULL DEFAULT 2 COMMENT '结构版本：1旧版厘米 2多单位',
+    content_hash         VARCHAR(64)  COMMENT '方案内容指纹 SHA-256',
+    spec_json            LONGTEXT     NOT NULL COMMENT '方案内容 JSON（尺码/部位/规则/舍入）',
+    result_json          LONGTEXT     COMMENT '上一次完整生成结果 JSON（从未成功生成则为空）',
+    result_generated_at  DATETIME     COMMENT '结果生成时间',
+    remark               VARCHAR(300) COMMENT '备注',
+    created_at           DATETIME     NOT NULL,
+    updated_at           DATETIME     NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_grading_scheme_no (scheme_no),
+    KEY idx_gs_style (style_id),
+    KEY idx_gs_temporary (temporary)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '版型放码方案';
 
 -- ---------- 客户 ----------
 INSERT INTO customer (id, customer_no, name, phone, gender, vip_level) VALUES

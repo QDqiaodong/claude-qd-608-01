@@ -43,6 +43,12 @@ const routes = [
     name: 'measurements',
     component: () => import('../views/MeasureRoomView.vue'),
     meta: { title: '量体记录', icon: '⌖', desc: '分部位尺寸录入与复核' }
+  },
+  {
+    path: '/grading',
+    name: 'grading',
+    component: () => import('../views/PatternGradingView.vue'),
+    meta: { title: '版型批量放码', icon: '⟁', desc: '基准版 → 完整尺码组：固定/比例/分段、左右分侧、厘米毫米零漂移' }
   }
 ]
 

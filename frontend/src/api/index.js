@@ -92,4 +92,16 @@ export const fittingApi = {
   meta: () => request.get('/fitting-issues/meta')
 }
 
+export const gradingApi = {
+  meta: () => request.get('/grading/meta'),
+  list: (params) => request.get('/grading/schemes', { params }),
+  detail: (id) => request.get(`/grading/schemes/${id}`),
+  save: (data) => request.post('/grading/schemes', data),
+  saveAndGenerate: (data) => request.post('/grading/schemes/save-and-generate', data),
+  generate: (id) => request.post(`/grading/schemes/${id}/generate`),
+  remove: (id) => request.delete(`/grading/schemes/${id}`),
+  preview: (data) => request.post('/grading/preview', data),
+  compare: (schemeAId, schemeBId) => request.get('/grading/compare', { params: { schemeAId, schemeBId } })
+}
+
 export default request

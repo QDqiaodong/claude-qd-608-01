@@ -55,7 +55,8 @@ const menus = [
   { path: '/work-orders', icon: '⧉', title: '工序工单', desc: '状态推进 + 工时统计' },
   { path: '/fitting', icon: '⚯', title: '试衣整改台', desc: '试衣问题单 → 返修轮次 → 复核收口闭环' },
   { path: '/styles', icon: '❧', title: '款式管理', desc: '款号 / 品类 / 基础价 / 工艺难度' },
-  { path: '/measurements', icon: '⌖', title: '量体记录', desc: '分部位尺寸录入与复核' }
+  { path: '/measurements', icon: '⌖', title: '量体记录', desc: '分部位尺寸录入与复核' },
+  { path: '/grading', icon: '⟁', title: '版型批量放码', desc: '基准版推导完整尺码组（固定/比例/分段）' }
 ]
 
 const current = computed(() => menus.find((m) => m.path === route.path) || menus[0])
