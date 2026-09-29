@@ -29,6 +29,7 @@ DROP TABLE IF EXISTS measurement;
 DROP TABLE IF EXISTS fabric;
 DROP TABLE IF EXISTS style;
 DROP TABLE IF EXISTS customer;
+DROP TABLE IF EXISTS grade_scheme;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -229,6 +230,34 @@ CREATE TABLE fitting_action_log (
     KEY idx_fal_order (order_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '试衣整改操作流水';
 
+-- ---------------------------------------------------------------------------
+-- 模块七：版型批量放码
+-- 内部一律以【毫米】为规范单位（BigDecimal 序列化为字符串），round_step_mm 是统一舍入步进；
+-- sizes/bases/rules 为规范化规则，snapshot 为服务端一次算完的完整不可变结果。
+-- legacy_flag=1 是旧厘米数据兼容行（round_step_mm=0.1，重算仍为旧的两位小数厘米值）。
+-- ---------------------------------------------------------------------------
+CREATE TABLE grade_scheme (
+    id             BIGINT       NOT NULL AUTO_INCREMENT,
+    scheme_no      VARCHAR(30)  NOT NULL COMMENT '放码方案号',
+    name           VARCHAR(80)  NOT NULL COMMENT '方案名称',
+    style_id       BIGINT       COMMENT '关联款式（空=临时计算方案）',
+    status         VARCHAR(10)  NOT NULL DEFAULT 'SAVED' COMMENT 'SAVED/临时方案不落库',
+    base_size_code VARCHAR(20)  NOT NULL COMMENT '基准尺码',
+    input_unit     VARCHAR(4)   NOT NULL DEFAULT 'CM' COMMENT '录入单位 CM/MM（仅影响录入回显）',
+    round_step_mm  DECIMAL(8,2) NOT NULL DEFAULT 1.00 COMMENT '统一舍入步进（毫米）',
+    sizes_json     MEDIUMTEXT   NOT NULL COMMENT '有序尺码序列 JSON',
+    bases_json     MEDIUMTEXT   NOT NULL COMMENT '基准尺寸 JSON（毫米）',
+    rules_json     MEDIUMTEXT   NOT NULL COMMENT '分部位放码规则 JSON（毫米规范参数）',
+    snapshot_json  MEDIUMTEXT   NOT NULL COMMENT '完整结果快照 JSON（毫米+厘米+异常定位）',
+    legacy_flag    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '旧厘米数据兼容标记',
+    result_version INT          NOT NULL DEFAULT 1 COMMENT '结果版本，每次重新生成+1',
+    created_at     DATETIME     NOT NULL,
+    updated_at     DATETIME     NOT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_grade_scheme_no (scheme_no),
+    KEY idx_grade_style (style_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '版型批量放码方案';
+
 -- ---------- 客户 ----------
 INSERT INTO customer (id, customer_no, name, phone, gender, vip_level) VALUES
   (1, 'KH-2001', '沈曼青', '13801010101', '女', 'GOLD'),
@@ -400,3 +429,26 @@ INSERT INTO fitting_action_log
   (14, 4, 11, 4, 'FINISH_REWORK', '王姐', 'REWORKING', 'REWORKING', '返修完成，实耗 0.4 小时', '2026-09-22 17:30:00'),
   (15, 4, 11, 4, 'SUBMIT_REVIEW', '王姐', 'REWORKING', 'REVIEWING', '提交复核', '2026-09-22 17:35:00'),
   (16, 4, 11, 4, 'REVIEW_PASS', '方绮', 'REVIEWING', 'CLOSED', '复验线迹隐蔽，通过', '2026-09-23 11:40:00');
+
+-- ---------- 模块七：放码方案种子 ----------
+-- GR-7001：现代方案，含固定/比例/分段三种规则、左右不对称基准（左半肩 19.8 / 右半肩 19.7cm）、升码降码
+INSERT INTO grade_scheme
+  (id, scheme_no, name, style_id, status, base_size_code, input_unit, round_step_mm,
+   sizes_json, bases_json, rules_json, snapshot_json, legacy_flag, result_version, created_at, updated_at) VALUES
+  (1, 'GR-7001', '经典西装六码放码表（多规则）', 1, 'SAVED', 'M', 'CM', 1.00,
+   '["XS","S","M","L","XL","XXL"]',
+   '[{"part":"bust","side":"CENTER","valueMm":900},{"part":"waist","side":"CENTER","valueMm":740},{"part":"hip","side":"CENTER","valueMm":970},{"part":"bodyLength","side":"CENTER","valueMm":650},{"part":"shoulder","side":"LEFT","valueMm":198},{"part":"shoulder","side":"RIGHT","valueMm":197},{"part":"sleeveLength","side":"LEFT","valueMm":580},{"part":"sleeveLength","side":"RIGHT","valueMm":580}]',
+   '[{"part":"bust","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":40},{"part":"waist","side":"CENTER","ruleType":"RATIO","ratioPercent":4},{"part":"hip","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":36},{"part":"bodyLength","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":20},{"part":"shoulder","side":"LEFT","ruleType":"SEGMENT","segments":[{"fromLevel":-2,"toLevel":-1,"deltaMm":6},{"fromLevel":0,"toLevel":1,"deltaMm":4},{"fromLevel":2,"toLevel":3,"deltaMm":8}]},{"part":"shoulder","side":"RIGHT","ruleType":"SEGMENT","segments":[{"fromLevel":-2,"toLevel":-1,"deltaMm":6},{"fromLevel":0,"toLevel":1,"deltaMm":4},{"fromLevel":2,"toLevel":3,"deltaMm":8}]},{"part":"sleeveLength","side":"LEFT","ruleType":"FIXED","fixedDeltaMm":15},{"part":"sleeveLength","side":"RIGHT","ruleType":"FIXED","fixedDeltaMm":15}]',
+   '{"baseSizeCode":"M","baseLevel":0,"inputUnit":"CM","roundStepMm":1,"sizes":["XS","S","M","L","XL","XXL"],"levels":[-2,-1,0,1,2,3],"parts":[{"part":"bust","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 90cm + 级序 × +4cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":820,"valueMm":820,"valueCm":82,"deltaMm":-80},{"sizeCode":"S","level":-1,"rawMm":860,"valueMm":860,"valueCm":86,"deltaMm":-40},{"sizeCode":"M","level":0,"rawMm":900,"valueMm":900,"valueCm":90,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":940,"valueMm":940,"valueCm":94,"deltaMm":40},{"sizeCode":"XL","level":2,"rawMm":980,"valueMm":980,"valueCm":98,"deltaMm":80},{"sizeCode":"XXL","level":3,"rawMm":1020,"valueMm":1020,"valueCm":102,"deltaMm":120}]},{"part":"waist","side":"CENTER","ruleType":"RATIO","formula":"最终尺寸 = 74cm × (1 + 级序 × 4%)","cells":[{"sizeCode":"XS","level":-2,"rawMm":680.8,"valueMm":681,"valueCm":68.1,"deltaMm":-59},{"sizeCode":"S","level":-1,"rawMm":710.4,"valueMm":710,"valueCm":71,"deltaMm":-30},{"sizeCode":"M","level":0,"rawMm":740,"valueMm":740,"valueCm":74,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":769.6,"valueMm":770,"valueCm":77,"deltaMm":30},{"sizeCode":"XL","level":2,"rawMm":799.2,"valueMm":799,"valueCm":79.9,"deltaMm":59},{"sizeCode":"XXL","level":3,"rawMm":828.8,"valueMm":829,"valueCm":82.9,"deltaMm":89}]},{"part":"hip","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 97cm + 级序 × +3.6cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":898,"valueMm":898,"valueCm":89.8,"deltaMm":-72},{"sizeCode":"S","level":-1,"rawMm":934,"valueMm":934,"valueCm":93.4,"deltaMm":-36},{"sizeCode":"M","level":0,"rawMm":970,"valueMm":970,"valueCm":97,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":1006,"valueMm":1006,"valueCm":100.6,"deltaMm":36},{"sizeCode":"XL","level":2,"rawMm":1042,"valueMm":1042,"valueCm":104.2,"deltaMm":72},{"sizeCode":"XXL","level":3,"rawMm":1078,"valueMm":1078,"valueCm":107.8,"deltaMm":108}]},{"part":"bodyLength","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 65cm + 级序 × +2cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":610,"valueMm":610,"valueCm":61,"deltaMm":-40},{"sizeCode":"S","level":-1,"rawMm":630,"valueMm":630,"valueCm":63,"deltaMm":-20},{"sizeCode":"M","level":0,"rawMm":650,"valueMm":650,"valueCm":65,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":670,"valueMm":670,"valueCm":67,"deltaMm":20},{"sizeCode":"XL","level":2,"rawMm":690,"valueMm":690,"valueCm":69,"deltaMm":40},{"sizeCode":"XXL","level":3,"rawMm":710,"valueMm":710,"valueCm":71,"deltaMm":60}]},{"part":"shoulder","side":"LEFT","ruleType":"SEGMENT","formula":"分段累计（相对基准级序 0）：级序 -2~-1：每升一级 +0.6cm；级序 0~+1：每升一级 +0.4cm；级序 +2~+3：每升一级 +0.8cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":188,"valueMm":188,"valueCm":18.8,"deltaMm":-10},{"sizeCode":"S","level":-1,"rawMm":194,"valueMm":194,"valueCm":19.4,"deltaMm":-4},{"sizeCode":"M","level":0,"rawMm":198,"valueMm":198,"valueCm":19.8,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":202,"valueMm":202,"valueCm":20.2,"deltaMm":4},{"sizeCode":"XL","level":2,"rawMm":206,"valueMm":206,"valueCm":20.6,"deltaMm":8},{"sizeCode":"XXL","level":3,"rawMm":214,"valueMm":214,"valueCm":21.4,"deltaMm":16}]},{"part":"shoulder","side":"RIGHT","ruleType":"SEGMENT","formula":"分段累计（相对基准级序 0）：级序 -2~-1：每升一级 +0.6cm；级序 0~+1：每升一级 +0.4cm；级序 +2~+3：每升一级 +0.8cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":187,"valueMm":187,"valueCm":18.7,"deltaMm":-10},{"sizeCode":"S","level":-1,"rawMm":193,"valueMm":193,"valueCm":19.3,"deltaMm":-4},{"sizeCode":"M","level":0,"rawMm":197,"valueMm":197,"valueCm":19.7,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":201,"valueMm":201,"valueCm":20.1,"deltaMm":4},{"sizeCode":"XL","level":2,"rawMm":205,"valueMm":205,"valueCm":20.5,"deltaMm":8},{"sizeCode":"XXL","level":3,"rawMm":213,"valueMm":213,"valueCm":21.3,"deltaMm":16}]},{"part":"sleeveLength","side":"LEFT","ruleType":"FIXED","formula":"最终尺寸 = 58cm + 级序 × +1.5cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":550,"valueMm":550,"valueCm":55,"deltaMm":-30},{"sizeCode":"S","level":-1,"rawMm":565,"valueMm":565,"valueCm":56.5,"deltaMm":-15},{"sizeCode":"M","level":0,"rawMm":580,"valueMm":580,"valueCm":58,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":595,"valueMm":595,"valueCm":59.5,"deltaMm":15},{"sizeCode":"XL","level":2,"rawMm":610,"valueMm":610,"valueCm":61,"deltaMm":30},{"sizeCode":"XXL","level":3,"rawMm":625,"valueMm":625,"valueCm":62.5,"deltaMm":45}]},{"part":"sleeveLength","side":"RIGHT","ruleType":"FIXED","formula":"最终尺寸 = 58cm + 级序 × +1.5cm","cells":[{"sizeCode":"XS","level":-2,"rawMm":550,"valueMm":550,"valueCm":55,"deltaMm":-30},{"sizeCode":"S","level":-1,"rawMm":565,"valueMm":565,"valueCm":56.5,"deltaMm":-15},{"sizeCode":"M","level":0,"rawMm":580,"valueMm":580,"valueCm":58,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":595,"valueMm":595,"valueCm":59.5,"deltaMm":15},{"sizeCode":"XL","level":2,"rawMm":610,"valueMm":610,"valueCm":61,"deltaMm":30},{"sizeCode":"XXL","level":3,"rawMm":625,"valueMm":625,"valueCm":62.5,"deltaMm":45}]}],"issues":[],"elapsedMs":0}',
+   0, 1, '2026-09-26 10:00:00', '2026-09-26 10:00:00');
+
+-- GR-7099：旧厘米系统迁移数据，只有厘米两位小数；按兼容规则（round_step_mm=0.1）读入，结果与旧系统一致
+INSERT INTO grade_scheme
+  (id, scheme_no, name, style_id, status, base_size_code, input_unit, round_step_mm,
+   sizes_json, bases_json, rules_json, snapshot_json, legacy_flag, result_version, created_at, updated_at) VALUES
+  (2, 'GR-7099', '旧版三码放码表（厘米迁移）', 12, 'SAVED', 'M', 'CM', 0.10,
+   '["S","M","L"]',
+   '[{"part":"bust","side":"CENTER","valueMm":880},{"part":"waist","side":"CENTER","valueMm":720},{"part":"hip","side":"CENTER","valueMm":940},{"part":"bodyLength","side":"CENTER","valueMm":620},{"part":"shoulder","side":"LEFT","valueMm":192.5},{"part":"shoulder","side":"RIGHT","valueMm":192.5},{"part":"sleeveLength","side":"LEFT","valueMm":570},{"part":"sleeveLength","side":"RIGHT","valueMm":570}]',
+   '[{"part":"bust","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":40},{"part":"waist","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":30},{"part":"hip","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":35},{"part":"bodyLength","side":"CENTER","ruleType":"FIXED","fixedDeltaMm":15},{"part":"shoulder","side":"LEFT","ruleType":"FIXED","fixedDeltaMm":5},{"part":"shoulder","side":"RIGHT","ruleType":"FIXED","fixedDeltaMm":5},{"part":"sleeveLength","side":"LEFT","ruleType":"FIXED","fixedDeltaMm":10},{"part":"sleeveLength","side":"RIGHT","ruleType":"FIXED","fixedDeltaMm":10}]',
+   '{"baseSizeCode":"M","baseLevel":0,"inputUnit":"CM","roundStepMm":0.1,"sizes":["S","M","L"],"levels":[-1,0,1],"parts":[{"part":"bust","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 88cm + 级序 × +4cm","cells":[{"sizeCode":"S","level":-1,"rawMm":840,"valueMm":840,"valueCm":84,"deltaMm":-40},{"sizeCode":"M","level":0,"rawMm":880,"valueMm":880,"valueCm":88,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":920,"valueMm":920,"valueCm":92,"deltaMm":40}]},{"part":"waist","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 72cm + 级序 × +3cm","cells":[{"sizeCode":"S","level":-1,"rawMm":690,"valueMm":690,"valueCm":69,"deltaMm":-30},{"sizeCode":"M","level":0,"rawMm":720,"valueMm":720,"valueCm":72,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":750,"valueMm":750,"valueCm":75,"deltaMm":30}]},{"part":"hip","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 94cm + 级序 × +3.5cm","cells":[{"sizeCode":"S","level":-1,"rawMm":905,"valueMm":905,"valueCm":90.5,"deltaMm":-35},{"sizeCode":"M","level":0,"rawMm":940,"valueMm":940,"valueCm":94,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":975,"valueMm":975,"valueCm":97.5,"deltaMm":35}]},{"part":"bodyLength","side":"CENTER","ruleType":"FIXED","formula":"最终尺寸 = 62cm + 级序 × +1.5cm","cells":[{"sizeCode":"S","level":-1,"rawMm":605,"valueMm":605,"valueCm":60.5,"deltaMm":-15},{"sizeCode":"M","level":0,"rawMm":620,"valueMm":620,"valueCm":62,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":635,"valueMm":635,"valueCm":63.5,"deltaMm":15}]},{"part":"shoulder","side":"LEFT","ruleType":"FIXED","formula":"最终尺寸 = 19.25cm + 级序 × +0.5cm","cells":[{"sizeCode":"S","level":-1,"rawMm":187.5,"valueMm":187.5,"valueCm":18.75,"deltaMm":-5},{"sizeCode":"M","level":0,"rawMm":192.5,"valueMm":192.5,"valueCm":19.25,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":197.5,"valueMm":197.5,"valueCm":19.75,"deltaMm":5}]},{"part":"shoulder","side":"RIGHT","ruleType":"FIXED","formula":"最终尺寸 = 19.25cm + 级序 × +0.5cm","cells":[{"sizeCode":"S","level":-1,"rawMm":187.5,"valueMm":187.5,"valueCm":18.75,"deltaMm":-5},{"sizeCode":"M","level":0,"rawMm":192.5,"valueMm":192.5,"valueCm":19.25,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":197.5,"valueMm":197.5,"valueCm":19.75,"deltaMm":5}]},{"part":"sleeveLength","side":"LEFT","ruleType":"FIXED","formula":"最终尺寸 = 57cm + 级序 × +1cm","cells":[{"sizeCode":"S","level":-1,"rawMm":560,"valueMm":560,"valueCm":56,"deltaMm":-10},{"sizeCode":"M","level":0,"rawMm":570,"valueMm":570,"valueCm":57,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":580,"valueMm":580,"valueCm":58,"deltaMm":10}]},{"part":"sleeveLength","side":"RIGHT","ruleType":"FIXED","formula":"最终尺寸 = 57cm + 级序 × +1cm","cells":[{"sizeCode":"S","level":-1,"rawMm":560,"valueMm":560,"valueCm":56,"deltaMm":-10},{"sizeCode":"M","level":0,"rawMm":570,"valueMm":570,"valueCm":57,"deltaMm":0},{"sizeCode":"L","level":1,"rawMm":580,"valueMm":580,"valueCm":58,"deltaMm":10}]}],"issues":[],"elapsedMs":0}',
+   1, 1, '2026-09-26 10:00:00', '2026-09-26 10:00:00');
